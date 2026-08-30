@@ -146,5 +146,3 @@ appsettings.json
 .tmp
 .source
 web-panel/bridge/wand-remote-bridge.cjs
-.vscode
-docs

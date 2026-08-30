@@ -18,7 +18,29 @@ namespace WandEnhancer.Converters
 
         public virtual object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            return value is bool booleanValue && booleanValue ? True : False;
+            switch (value)
+            {
+                case null:
+                    return False;
+                case bool booleanValue:
+                    return booleanValue ? True : False;
+            }
+
+            if (!(value is int intValue))
+            {
+                return True;
+            }
+                
+            switch (parameter)
+            {
+                case null:
+                    return intValue == 0 ? False : True;
+                case int param:
+                    return intValue > param ? True : False;
+                default:
+                    //Because object not null
+                    return True;
+            }
         }
 
         public virtual object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

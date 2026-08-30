@@ -9,6 +9,13 @@ namespace AsarSharp.AsarFileSystem
     {
         public FileType Type { get; set; }
         public FileSystemInfo Stat { get; set; }
+        public TransformedFile Transformed { get; set; }
+    }
+
+    public class TransformedFile
+    {
+        public string Path { get; set; }
+        public FileSystemInfo Stat { get; set; }
     }
 
     public enum FileType
@@ -29,7 +36,7 @@ namespace AsarSharp.AsarFileSystem
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
-                throw new IOException($"Failed to read attributes for '{filename}'", ex);
+                return null;
             }
 
             bool isDirectory = (attributes & FileAttributes.Directory) == FileAttributes.Directory;
@@ -52,6 +59,7 @@ namespace AsarSharp.AsarFileSystem
             foreach (var fullPath in CrawlIterative(dir))
             {
                 var type = DetermineFileType(fullPath);
+                if (type == null) continue;
                 metadata[fullPath] = type;
                 if (type.Type == FileType.Link) links.Add(fullPath);
                 filenames.Add(fullPath);
@@ -69,8 +77,7 @@ namespace AsarSharp.AsarFileSystem
                 {
                     if (string.Equals(filename, link, StringComparison.OrdinalIgnoreCase)) continue;
 
-                    // Require a separator after the prefix so "…/foobar" does not match link "…/foo".
-                    if (filename.StartsWith(link + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    if (filename.StartsWith(link, StringComparison.OrdinalIgnoreCase))
                     {
                         string rel = Extensions.GetRelativePath(link, fileDir);
                         if (!rel.StartsWith("..", StringComparison.Ordinal))
@@ -113,7 +120,7 @@ namespace AsarSharp.AsarFileSystem
                 foreach (var entry in entries)
                 {
                     result.Add(entry.FullName);
-                    if (entry is DirectoryInfo subDir && (subDir.Attributes & FileAttributes.ReparsePoint) == 0)
+                    if (entry is DirectoryInfo subDir)
                         stack.Push(subDir);
                 }
             }

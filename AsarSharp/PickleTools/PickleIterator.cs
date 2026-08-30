@@ -18,7 +18,10 @@ namespace AsarSharp.PickleTools
             _endIndex = pickle.GetPayloadSize();
         }
 
-
+        public bool ReadBool()
+        {
+            return ReadInt() != 0;
+        }
 
         public int ReadInt()
         {
@@ -30,7 +33,25 @@ namespace AsarSharp.PickleTools
             return ReadBytes(Pickle.SIZE_UINT32, BitConverter.ToUInt32);
         }
 
+        public long ReadInt64()
+        {
+            return ReadBytes(Pickle.SIZE_INT64, BitConverter.ToInt64);
+        }
 
+        public ulong ReadUInt64()
+        {
+            return ReadBytes(Pickle.SIZE_UINT64, BitConverter.ToUInt64);
+        }
+
+        public float ReadFloat()
+        {
+            return ReadBytes(Pickle.SIZE_FLOAT, BitConverter.ToSingle);
+        }
+
+        public double ReadDouble()
+        {
+            return ReadBytes(Pickle.SIZE_DOUBLE, BitConverter.ToDouble);
+        }
 
         public string ReadString()
         {
@@ -54,7 +75,7 @@ namespace AsarSharp.PickleTools
 
         private int GetReadPayloadOffsetAndAdvance(int length)
         {
-            if (length < 0 || length > _endIndex - _readIndex)
+            if (length > _endIndex - _readIndex)
             {
                 _readIndex = _endIndex;
                 throw new InvalidOperationException($"Failed to read data with length of {length}");

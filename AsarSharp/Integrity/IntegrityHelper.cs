@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
-using AsarSharp.Utils;
 using Newtonsoft.Json;
 
 namespace AsarSharp.Integrity
@@ -61,9 +60,7 @@ namespace AsarSharp.Integrity
                 var blockHashes = new List<string>(estimatedBlockCount);
                 int bytesRead;
 
-                // ReadFull, not Read: a short read would hash a partial block and produce
-                // integrity blocks Electron rejects.
-                while ((bytesRead = fileStream.ReadFull(reusableBuffer, 0, reusableBuffer.Length)) > 0)
+                while ((bytesRead = fileStream.Read(reusableBuffer, 0, reusableBuffer.Length)) > 0)
                 {
                     blockHashes.Add(ToLowerHex(blockHash.ComputeHash(reusableBuffer, 0, bytesRead)));
                     fileHash.AppendData(reusableBuffer, 0, bytesRead);

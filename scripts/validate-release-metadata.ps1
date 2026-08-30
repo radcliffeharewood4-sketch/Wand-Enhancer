@@ -16,9 +16,7 @@ function Normalize-Version {
         throw 'Version value cannot be empty.'
     }
 
-    # AssemblyVersion holds four numbers only, so a pre-release tag such as
-    # 1.1.0.0-rc.1 must compare and look up its notes as 1.1.0.0.
-    return ($Value.Trim().TrimStart('v', 'V') -replace '-.*$', '')
+    return $Value.Trim().TrimStart('v', 'V')
 }
 
 function Get-ChangelogSection {

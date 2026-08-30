@@ -18,8 +18,7 @@ function Normalize-Version {
         throw 'Version value cannot be empty.'
     }
 
-    # A pre-release tag (1.1.0.0-rc.1) reads the notes of its base version.
-    return ($Value.Trim().TrimStart('v', 'V') -replace '-.*$', '')
+    return $Value.Trim().TrimStart('v', 'V')
 }
 
 function Get-ChangelogSection {

@@ -33,7 +33,7 @@ namespace AsarSharp.AsarFileSystem
             _headerSize = headerSize;
         }
 
-        public FilesystemEntry SearchNodeFromDirectory(string p, bool create = true)
+        public FilesystemEntry SearchNodeFromDirectory(string p)
         {
             FilesystemEntry json = _header;
 
@@ -59,31 +59,12 @@ namespace AsarSharp.AsarFileSystem
                 string seg = p.Substring(start, segLen);
 
                 if (!json.IsDirectory)
-                {
-                    if (create)
-                        throw new Exception($"Unexpected directory state while traversing: {p}");
-                    return null;
-                }
-
-                if (json.Files == null)
-                {
-                    if (create)
-                        json.Files = new Dictionary<string, FilesystemEntry>(StringComparer.Ordinal);
-                    else
-                        return null;
-                }
+                    throw new Exception($"Unexpected directory state while traversing: {p}");
 
                 if (!json.Files.TryGetValue(seg, out var child))
                 {
-                    if (create)
-                    {
-                        child = new FilesystemEntry { Files = new Dictionary<string, FilesystemEntry>(StringComparer.Ordinal) };
-                        json.Files[seg] = child;
-                    }
-                    else
-                    {
-                        return null;
-                    }
+                    child = new FilesystemEntry { Files = new Dictionary<string, FilesystemEntry>(StringComparer.Ordinal) };
+                    json.Files[seg] = child;
                 }
                 json = child;
                 start = end + 1;
@@ -100,7 +81,7 @@ namespace AsarSharp.AsarFileSystem
 
             string name = Path.GetFileName(rel);
             string dir = Extensions.GetDirectoryName(rel);
-            var parent = SearchNodeFromDirectory(dir, true);
+            var parent = SearchNodeFromDirectory(dir);
 
             if (parent.Files == null)
                 parent.Files = new Dictionary<string, FilesystemEntry>(StringComparer.Ordinal);
@@ -130,23 +111,18 @@ namespace AsarSharp.AsarFileSystem
             }
         }
 
-        public FilesystemEntry GetNode(string p, bool followLinks = true, int linkDepth = 0)
+        public FilesystemEntry GetNode(string p, bool followLinks = true)
         {
-            if (linkDepth > 40)
-                throw new Exception($"Symlink loop detected at {p}");
-
             p = p.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-            FilesystemEntry node = SearchNodeFromDirectory(Extensions.GetDirectoryName(p), false);
-            if (node == null)
-                return null;
+            FilesystemEntry node = SearchNodeFromDirectory(Extensions.GetDirectoryName(p));
             string name = Path.GetFileName(p);
 
             if (node.IsLink && followLinks)
-                return GetNode(Path.Combine(node.Link, name), followLinks, linkDepth + 1);
+                return GetNode(Path.Combine(node.Link, name));
 
             if (!string.IsNullOrEmpty(name))
             {
-                if (node.IsDirectory && node.Files != null && node.Files.TryGetValue(name, out var entry))
+                if (node.IsDirectory && node.Files.TryGetValue(name, out var entry))
                     return entry;
                 return null;
             }
@@ -154,16 +130,15 @@ namespace AsarSharp.AsarFileSystem
             return node;
         }
 
-        public FilesystemEntry GetFile(string p, bool followLinks = true, int linkDepth = 0)
+        public FilesystemEntry GetFile(string p, bool followLinks = true)
         {
-            if (linkDepth > 40)
-                throw new Exception($"Symlink loop detected at {p}");
-
-            FilesystemEntry info = GetNode(p, followLinks, linkDepth);
+            FilesystemEntry info = GetNode(p, followLinks);
             if (info == null) throw new Exception($"\"{p}\" was not found in this archive");
-            if (info.IsLink && followLinks) return GetFile(info.Link, followLinks, linkDepth + 1);
+            if (info.IsLink && followLinks) return GetFile(info.Link, followLinks);
             return info;
         }
+
+        public static string ReadLink(string path) => throw new NotImplementedException();
 
         #region Writing
 
@@ -184,7 +159,7 @@ namespace AsarSharp.AsarFileSystem
         public void InsertFile(string path, bool shouldUnpack, CrawledFileType file,
             IntegrityHelper.FileIntegrity precomputedIntegrity = null)
         {
-            var (dirNode, _) = SearchNodeFromPathWithParent(path);
+            var (dirNode, _) = SearchNodeFromPathWithParent(Path.GetDirectoryName(path) ?? path);
             var node = SearchNodeFromPath(path);
 
             long size;

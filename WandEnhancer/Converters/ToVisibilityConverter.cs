@@ -9,4 +9,10 @@ namespace WandEnhancer.Converters
         { }
     }
 
+    internal sealed class ToVisibilityInvertedConverter : BaseBooleanConverter<Visibility>
+    {
+        public ToVisibilityInvertedConverter() :
+            base(Visibility.Collapsed, Visibility.Visible)
+        { }
+    }
 }

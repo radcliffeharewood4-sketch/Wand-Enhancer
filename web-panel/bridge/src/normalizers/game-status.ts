@@ -1,16 +1,12 @@
-import type { GameStatusPayload } from '../../../protocol/messages';
-import type { UnknownRecord } from '../types';
-
 const { isRecord, safeString, toStringId } = require('../utils');
 
-function normalizeGameStatusSnapshot(rawSnapshot: unknown): GameStatusPayload | null {
+function normalizeGameStatusSnapshot(rawSnapshot) {
     if (!isRecord(rawSnapshot)) return null;
-    const snap = rawSnapshot as UnknownRecord;
-    const rawSession = isRecord(snap.session) ? (snap.session as UnknownRecord) : {};
-    const rawTrainer = isRecord(snap.trainer) ? (snap.trainer as UnknownRecord) : {};
+    const rawSession = isRecord(rawSnapshot.session) ? rawSnapshot.session : {};
+    const rawTrainer = isRecord(rawSnapshot.trainer) ? rawSnapshot.trainer : {};
     return {
-        instanceId: safeString(snap.instanceId, 'wand-game-status'),
-        updatedAt: typeof snap.updatedAt === 'string' ? snap.updatedAt : new Date().toISOString(),
+        instanceId: safeString(rawSnapshot.instanceId, 'wand-game-status'),
+        updatedAt: typeof rawSnapshot.updatedAt === 'string' ? rawSnapshot.updatedAt : new Date().toISOString(),
         session: {
             state: rawSession.state === 'running' ? 'running' : 'idle',
             event: safeString(rawSession.event, 'snapshot'),
@@ -18,10 +14,7 @@ function normalizeGameStatusSnapshot(rawSnapshot: unknown): GameStatusPayload | 
             gameId: toStringId(rawSession.gameId),
             titleId: toStringId(rawSession.titleId),
             titleName: typeof rawSession.titleName === 'string' ? rawSession.titleName : null,
-            sessionDurationSeconds:
-                typeof rawSession.sessionDurationSeconds === 'number'
-                    ? rawSession.sessionDurationSeconds
-                    : null,
+            sessionDurationSeconds: typeof rawSession.sessionDurationSeconds === 'number' ? rawSession.sessionDurationSeconds : null,
             startedAt: typeof rawSession.startedAt === 'string' ? rawSession.startedAt : null,
             endedAt: typeof rawSession.endedAt === 'string' ? rawSession.endedAt : null,
         },
@@ -36,7 +29,7 @@ function normalizeGameStatusSnapshot(rawSnapshot: unknown): GameStatusPayload | 
     };
 }
 
-function gameStatusSignature(snapshot: GameStatusPayload): string {
+function gameStatusSignature(snapshot) {
     return [
         snapshot.session.state,
         snapshot.session.event,

@@ -1,1 +1,0 @@
-${app}.on("browser-window-created",((_,w)=>{try{w.webContents.on("before-input-event",((_,i)=>{if("F12"===i.key&&"keyDown"===i.type){w.webContents.isDevToolsOpened()?w.webContents.closeDevTools():w.webContents.openDevTools({mode:"detach"})}}))}catch(e){}})),

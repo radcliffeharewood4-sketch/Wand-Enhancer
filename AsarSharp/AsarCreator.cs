@@ -73,26 +73,22 @@ namespace AsarSharp
                     filesystem.InsertFile(filename, shouldUnpack, file, placeholder);
                     break;
                 case FileType.Link:
-                    throw new NotSupportedException($"Packing symlinks is not supported: '{filename}'");
+                    throw new NotImplementedException();
             }
         }
 
-        /// <summary>
-        /// Matches the directory path (relative to the archive root) against the unpack regex.
-        /// </summary>
-        private bool ShouldUnpackPath(string relativeParentPath)
+        private bool ShouldUnpackPath(string relativePath)
         {
-            return _options?.Unpack?.IsMatch(relativeParentPath) == true;
+            return _options?.Unpack?.IsMatch(relativePath) == true;
         }
 
         private void InsertsDone(Filesystem filesystem, List<Disk.BasicFileInfo> files)
         {
-            string dir = Path.GetDirectoryName(_destPath);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-
+            Directory.CreateDirectory(
+                Path.GetDirectoryName(_destPath)
+                ?? throw new InvalidOperationException());
             Disk.WriteFileSystem(_destPath, filesystem,
-                new Disk.FilesystemFilesAndLinks { Files = files }, _metadata);
+                new Disk.FilesystemFilesAndLinks { Files = files, Links = null }, _metadata);
         }
     }
 }

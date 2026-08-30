@@ -6,8 +6,7 @@ const { REMOTE_BASE_PATH } = require('./constants');
 
 const IPV4_OCTET_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const PHYSICAL_INTERFACE_NAME_PATTERN = /(?:ethernet|wi-?fi|wireless|wlan|lan|local area)/i;
-const VIRTUAL_INTERFACE_NAME_PATTERN =
-    /(?:bluetooth|container|docker|hamachi|hyper-v|loopback|npcap|pseudo|tap|tailscale|teredo|tunnel|tun|virtual|vmware|vbox|virtualbox|vpn|wireguard|wsl|zerotier)/i;
+const VIRTUAL_INTERFACE_NAME_PATTERN = /(?:bluetooth|container|docker|hamachi|hyper-v|loopback|npcap|pseudo|tap|tailscale|teredo|tunnel|tun|virtual|vmware|vbox|virtualbox|vpn|wireguard|wsl|zerotier)/i;
 const VIRTUAL_MAC_PREFIXES = new Set([
     '00:05:69',
     '00:0c:29',
@@ -19,10 +18,7 @@ const VIRTUAL_MAC_PREFIXES = new Set([
     '52:54:00',
 ]);
 
-import type { ServerResponse } from 'node:http';
-import type { NetworkInterfaceInfo } from 'node:os';
-
-function contentTypeFor(filePath: string) {
+function contentTypeFor(filePath) {
     const extension = path.extname(filePath).toLowerCase();
     switch (extension) {
         case '.html':
@@ -41,15 +37,12 @@ function contentTypeFor(filePath: string) {
     }
 }
 
-function getAdvertisedUrls(port: number) {
-    const candidates: { index: number; score: number; url: string }[] = [];
+function getAdvertisedUrls(port) {
+    const candidates: any[] = [];
     const interfaces = os.networkInterfaces();
     let index = 0;
 
-    for (const [name, entries] of Object.entries(interfaces) as [
-        string,
-        NetworkInterfaceInfo[] | undefined,
-    ][]) {
+    for (const [name, entries] of Object.entries(interfaces) as [string, any[] | undefined][]) {
         if (!entries) {
             continue;
         }
@@ -76,17 +69,15 @@ function getAdvertisedUrls(port: number) {
     return Array.from(new Set(urls));
 }
 
-function isUsableIpv4Entry(entry: NetworkInterfaceInfo) {
-    return Boolean(
-        entry && !entry.internal && isIpv4Family(entry.family) && parseIpv4(entry.address),
-    );
+function isUsableIpv4Entry(entry) {
+    return Boolean(entry && !entry.internal && isIpv4Family(entry.family) && parseIpv4(entry.address));
 }
 
-function isIpv4Family(family: string | number) {
+function isIpv4Family(family) {
     return family === 'IPv4' || family === 4;
 }
 
-function scoreIpv4Entry(name: string, entry: NetworkInterfaceInfo) {
+function scoreIpv4Entry(name, entry) {
     const octets = parseIpv4(entry.address) as number[];
     let score = 0;
 
@@ -125,7 +116,7 @@ function scoreIpv4Entry(name: string, entry: NetworkInterfaceInfo) {
     return score;
 }
 
-function parseIpv4(address: unknown): number[] | null {
+function parseIpv4(address): number[] | null {
     if (typeof address !== 'string') {
         return null;
     }
@@ -136,24 +127,18 @@ function parseIpv4(address: unknown): number[] | null {
     }
 
     const octets = match.slice(1).map((part) => Number(part));
-    return octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
-        ? octets
-        : null;
+    return octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) ? octets : null;
 }
 
-function isPrivateIpv4(octets: number[]) {
-    return (
-        octets[0] === 10 ||
-        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-        (octets[0] === 192 && octets[1] === 168)
-    );
+function isPrivateIpv4(octets) {
+    return octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168);
 }
 
-function isLinkLocalIpv4(octets: number[]) {
+function isLinkLocalIpv4(octets) {
     return octets[0] === 169 && octets[1] === 254;
 }
 
-function isVirtualMac(mac: unknown) {
+function isVirtualMac(mac) {
     if (typeof mac !== 'string') {
         return false;
     }
@@ -161,43 +146,9 @@ function isVirtualMac(mac: unknown) {
     return VIRTUAL_MAC_PREFIXES.has(mac.toLowerCase().slice(0, 8));
 }
 
-// Async on purpose: this runs on the same event loop as every live WebSocket client,
-// so a blocking read would stall trainer updates for everyone.
-/**
- * Resolves a request path inside `root`, or null when it escapes.
- * Today's routing happens to be safe only because pathnames are never percent-decoded;
- * decoding without this check would turn `%2e%2e%2f` into a real traversal.
- */
-function resolveInsideRoot(root: string, relativePath: string): string | null {
-    const decoded = safeDecode(relativePath);
-    if (decoded === null || decoded.indexOf('\0') >= 0) {
-        return null;
-    }
-
-    const resolvedRoot = path.resolve(root);
-    const candidate = path.resolve(resolvedRoot, `.${path.sep}${decoded}`);
-    const prefix = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
-
-    return candidate === resolvedRoot || candidate.startsWith(prefix) ? candidate : null;
-}
-
-function safeDecode(value: string): string | null {
+function serveFile(response, filePath) {
     try {
-        return decodeURIComponent(value);
-    } catch {
-        return null;
-    }
-}
-
-async function serveFile(response: ServerResponse, filePath: string | null) {
-    if (filePath === null) {
-        response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        response.end('Not found');
-        return;
-    }
-
-    try {
-        const content = await fs.promises.readFile(filePath);
+        const content = fs.readFileSync(filePath);
         response.writeHead(200, {
             'Content-Type': contentTypeFor(filePath),
             'Cache-Control': 'no-store',
@@ -211,6 +162,5 @@ async function serveFile(response: ServerResponse, filePath: string | null) {
 
 module.exports = {
     getAdvertisedUrls,
-    resolveInsideRoot,
     serveFile,
 };

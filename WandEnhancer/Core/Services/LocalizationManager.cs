@@ -28,22 +28,6 @@ namespace WandEnhancer.Core.Services
 
         private static CultureInfo _currentLanguage;
         private static ResourceDictionary _englishBaseDictionary;
-        private static ResourceDictionary _activeLocaleDictionary;
-
-        /// <summary>
-        /// Localized string for <paramref name="key"/>, falling back to the key itself so a
-        /// missing entry is visible rather than silently blank.
-        /// </summary>
-        public static string Get(string key)
-        {
-            return Application.Current?.TryFindResource(key) as string ?? key;
-        }
-
-        /// <summary>Localized format string filled with <paramref name="args"/>.</summary>
-        public static string Format(string key, params object[] args)
-        {
-            return string.Format(Get(key), args);
-        }
 
         public static CultureInfo CurrentLanguage
         {
@@ -120,19 +104,20 @@ namespace WandEnhancer.Core.Services
                 localeDict[entry.Key] = targetDict[entry.Key];
             }
 
-            // Track the dictionary we injected: it is built by merging entries, so its Source is
-            // null and a Source-based lookup never finds it - every switch used to append another.
-            var merged = Application.Current.Resources.MergedDictionaries;
-            if (_activeLocaleDictionary != null && merged.Contains(_activeLocaleDictionary))
+            // Find and replace the old locale dictionary
+            var oldDict = Application.Current.Resources.MergedDictionaries
+                .FirstOrDefault(d => d.Source != null && d.Source.OriginalString.StartsWith("Locale/lang."));
+
+            if (oldDict != null)
             {
-                merged[merged.IndexOf(_activeLocaleDictionary)] = localeDict;
+                var index = Application.Current.Resources.MergedDictionaries.IndexOf(oldDict);
+                Application.Current.Resources.MergedDictionaries.Remove(oldDict);
+                Application.Current.Resources.MergedDictionaries.Insert(index, localeDict);
             }
             else
             {
-                merged.Add(localeDict);
+                Application.Current.Resources.MergedDictionaries.Add(localeDict);
             }
-
-            _activeLocaleDictionary = localeDict;
             
             if (saveSettings)
             {

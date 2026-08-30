@@ -1,65 +1,49 @@
-import type {
-    CheatSchema,
-    SetValueMessage,
-    TrainerMetaPayload,
-    TrainerValuesPayload,
-} from '../../protocol/messages';
-import { isOutgoingMessage } from '../../protocol/validation';
 import webContract from '../../protocol/web-contract.json';
-import { isRecord, safeString } from './utils';
 
 const BRIDGE_PROTOCOL_VERSION = webContract.protocolVersion;
 
-export function validateClientMessage(message: unknown, handshaken: boolean) {
+export function validateClientMessage(message, handshaken) {
     if (!isRecord(message) || typeof message.type !== 'string' || !isRecord(message.payload)) {
         return invalid('invalid_message', 'Expected a protocol envelope with an object payload.');
     }
 
     if (message.version !== BRIDGE_PROTOCOL_VERSION) {
-        return invalid(
-            'protocol_mismatch',
-            `Unsupported protocol version ${String(message.version)}.`,
-        );
+        return invalid('protocol_mismatch', `Unsupported protocol version ${String(message.version)}.`);
     }
 
     if (message.requestId !== null && typeof message.requestId !== 'string') {
         return invalid('invalid_request_id', 'requestId must be a string or null.');
     }
 
-    if (!isOutgoingMessage(message)) {
-        const type = (message as Record<string, unknown>).type;
-        if (type === 'hello') {
+    if (message.type === 'hello') {
+        if (message.payload.client !== 'mobile-web' || typeof message.payload.clientVersion !== 'string' || !isRecord(message.payload.capabilities)) {
             return invalid('invalid_hello', 'The hello payload is incomplete.');
         }
-        if (type === 'set_value') {
-            return invalid('invalid_set_value', 'trainerId, target and value are required.');
-        }
-        if (type === 'remote_command') {
-            return invalid('invalid_command', 'Unknown remote command.');
-        }
-        return invalid('unknown_message', 'Unknown protocol message type.');
+        return { ok: true };
     }
 
-    if (message.type !== 'hello' && !handshaken) {
+    if (!handshaken) {
         return invalid('handshake_required', 'Send a compatible hello message before commands.');
     }
 
-    return { ok: true };
+    if (message.type === 'set_value') {
+        if (!safeString(message.payload.trainerId) || !safeString(message.payload.target) || !('value' in message.payload)) {
+            return invalid('invalid_set_value', 'trainerId, target and value are required.');
+        }
+        return { ok: true };
+    }
+
+    if (message.type === 'remote_command') {
+        if (message.payload.action !== 'launch' && message.payload.action !== 'stop') {
+            return invalid('invalid_command', 'Unknown remote command.');
+        }
+        return { ok: true };
+    }
+
+    return invalid('unknown_message', 'Unknown protocol message type.');
 }
 
-/** Only the parts this validator actually reads, so callers need not build a full payload. */
-type ValidationSnapshot = {
-    trainerMeta: {
-        trainer: Pick<TrainerMetaPayload['trainer'], 'trainerId'>;
-        schema: { cheats: Pick<CheatSchema, 'target' | 'type'>[] };
-    };
-    trainerValues: Pick<TrainerValuesPayload, 'values'>;
-};
-
-export function validateSetValueTarget(
-    message: Pick<SetValueMessage, 'payload'>,
-    snapshot: ValidationSnapshot | null,
-) {
+export function validateSetValueTarget(message, snapshot) {
     const target = safeString(message.payload?.target);
     const requestedTrainerId = safeString(message.payload?.trainerId);
     const activeTrainerId = snapshot?.trainerMeta?.trainer?.trainerId || '';
@@ -81,6 +65,14 @@ export function validateSetValueTarget(
     };
 }
 
-function invalid(code: string, message: string) {
+function invalid(code, message) {
     return { ok: false, error: { code, message } };
+}
+
+function isRecord(value) {
+    return typeof value === 'object' && value !== null;
+}
+
+function safeString(value) {
+    return typeof value === 'string' && value.length > 0 ? value : '';
 }
