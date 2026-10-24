@@ -7,10 +7,7 @@ using WandEnhancer.Models;
 namespace WandEnhancer.Core
 {
     /// <summary>
-    /// Patch definitions. Each entry anchors on something Wand does not rename between builds -
-    /// an API endpoint, an IPC channel name or a public method name - and then navigates the
-    /// delimiter structure to the edit site. Minified identifiers are read out of the located
-    /// region rather than baked into a pattern, so a rebuild does not invalidate a patch.
+    /// Anchors patches on stable API names and resolves renamed identifiers within each method.
     /// </summary>
     internal static class EnhancerConfig
     {
@@ -59,24 +56,21 @@ namespace WandEnhancer.Core
                         },
                         new PatchEntry
                         {
-                            // Changing language returns a fresh account object that would otherwise
-                            // overwrite the patched subscription in the store.
+                            // Language changes replace the account in the store.
                             Name = "setAccountLanguage",
                             SearchHints = new[] { "setAccountLanguage(" },
                             Locate = js => ForceProSubscription(js, "setAccountLanguage")
                         },
                         new PatchEntry
                         {
-                            // Catches every path that dispatches ACTION_SET_ACCOUNT without going
-                            // through the account API methods above (refresh, push, profile edits).
+                            // Covers account writes that bypass the API wrappers.
                             Name = "setAccountReducer",
                             SearchHints = new[] { "ACTION_SET_ACCOUNT" },
                             Locate = LocateAccountReducer
                         },
                         new PatchEntry
                         {
-                            // Wand's own phone pairing performs a server-side device handoff that
-                            // signs this desktop session out. The injected panel does not use it.
+                            // Native phone pairing signs out the patched desktop session.
                             Name = "disableNativeRemotePairing",
                             SearchHints = new[] { "requestRemoteAuthCode" },
                             Locate = js => Edits(js.FindFunction("requestRemoteAuthCode")?
@@ -103,8 +97,7 @@ namespace WandEnhancer.Core
                     {
                         new PatchEntry
                         {
-                            // Hooked in the main process: the renderer's keydown dispatcher is
-                            // reshaped on every Wand release, the Electron app API is not.
+                            // Electron's main-process API is more stable than the renderer dispatcher.
                             Name = "devToolsBeforeInputEvent",
                             CandidateFileNames = new[] { "index.js" },
                             SearchHints = new[] { "whenReady().then(" },
@@ -167,8 +160,7 @@ namespace WandEnhancer.Core
                 return null;
             }
 
-            // The payload's ${account} survives PatchPayload untouched and is resolved by the
-            // regex replacement below, which is what carries the original identifier through.
+            // ${account} is a regex back-reference, not a PatchPayload placeholder.
             return Edits(reducer.ReplaceInBody(
                 @"account:\s*(?<account>[\w$]+)",
                 PatchPayload.Load("pro-account-reducer")));
@@ -222,10 +214,7 @@ namespace WandEnhancer.Core
             return Edits(reset.InsertAtEnd(PatchPayload.Load("remote-bridge-reset")));
         }
 
-        /// <summary>
-        /// Mirrors Wand's own client-state payload to the bridge by copying the object literal
-        /// verbatim, so fields Wand adds or drops between builds carry over untouched.
-        /// </summary>
+        /// <summary>Copies Wand's client-state fields without depending on their names or order.</summary>
         private static JsEdit[] LocateBridgeSync(JsCursor js)
         {
             int sendOpen = js.FindCall("send", "\"client-state\"");
@@ -242,8 +231,7 @@ namespace WandEnhancer.Core
                 throw new Exception("client-state payload object could not be located");
             }
 
-            // Prettified builds leave a trailing comma inside the literal; appending after it
-            // would produce an illegal hole.
+            // Remove the trailing comma before appending bridge fields.
             string snapshot = js.Text.Substring(snapshotOpen + 1, snapshotClose - snapshotOpen - 1)
                 .Trim()
                 .TrimEnd(',');
@@ -260,9 +248,7 @@ namespace WandEnhancer.Core
         }
 
         /// <summary>
-        /// Some builds wrap the whole snapshot method in <c>if (status === Connected)</c>. The bridge
-        /// must publish regardless of Wand's own remote status, so the guard is moved onto the send
-        /// itself, leaving the block - and the locals the payload reads - intact.
+        /// Moves the connection guard onto Wand's send so local bridge snapshots remain unconditional.
         /// </summary>
         private static IEnumerable<JsEdit> HoistConnectedGuard(JsCursor js, int sendOpen)
         {
@@ -282,9 +268,7 @@ namespace WandEnhancer.Core
             int openParen = stack[0];
             string test = js.Text.Substring(openParen + 1, closeParen - openParen - 1);
 
-            // Only the connection guard may be hoisted. A nested unrelated `if` would otherwise
-            // have its condition moved onto the send, and an `else` branch would be orphaned by
-            // turning the block into a bare one.
+            // Preserve unrelated conditions and any else branch.
             if (test.IndexOf("this.status", StringComparison.Ordinal) < 0 || HasElseBranch(js, blockOpen))
             {
                 yield break;
@@ -316,14 +300,32 @@ namespace WandEnhancer.Core
                 return null;
             }
 
-            // The same call reveals both the active-trainer field and the numeric or enum value
-            // Wand uses for a remote-originated write. Wand has sibling call sites for other
-            // sources (Overlay), so an ambiguous match would silently bind the wrong one.
-            var setValue = MatchExactlyOnce(RemoteSetValue, js.Text, "Remote setValue call");
+            var receiveOpen = js.FindCall("listen", "\"client-value-changed\"");
+            var receive = receiveOpen < 0 ? null : js.EnclosingFunction(receiveOpen);
+            if (receive == null)
+            {
+                throw new Exception("Remote value listener could not be located");
+            }
+
+            string handler = receive.Resolve(
+                @"listen\(\s*""client-value-changed""\s*,\s*\(?\s*[\w$]+\s*\)?\s*=>\s*this\.(?<handler>#[\w$]+)\(",
+                "handler");
+            var handlerMethod = js.FindFunction(handler);
+            if (handlerMethod == null)
+            {
+                throw new Exception("Remote value handler could not be located");
+            }
+
+            var setValue = MatchExactlyOnce(RemoteSetValue, handlerMethod.Body, "Remote setValue call");
+            var parameter = MatchExactlyOnce(
+                new Regex(@"setCurrentTrainer\(\s*(?<info>[\w$]+)"),
+                js.Text.Substring(method.Start, method.BodyOpen - method.Start),
+                "Trainer info parameter");
 
             return Edits(method.InsertAtStart(PatchPayload.Load(
                 "remote-bridge-renderer",
                 "trainer", setValue.Groups["trainer"].Value,
+                "trainerInfo", parameter.Groups["info"].Value,
                 "remoteSource", setValue.Groups["source"].Value)));
         }
 
@@ -335,8 +337,30 @@ namespace WandEnhancer.Core
                 return null;
             }
 
-            int sendClose = js.MatchClose(sendOpen);
-            return Edits(new JsEdit(sendClose + 1, PatchPayload.Load("remote-bridge-value-delta")));
+            var subscription = js.EnclosingFunction(sendOpen);
+            var snapshot = FindClientStateMethod(js);
+            if (subscription == null || snapshot == null ||
+                subscription.Body.IndexOf(".onValueSet(", StringComparison.Ordinal) < 0)
+            {
+                throw new Exception("Trainer value subscription could not be located");
+            }
+
+            // Capture at subscription time so a late callback cannot impersonate the next trainer.
+            string trainerId = snapshot.Resolve(@"trainerId:\s*(?<id>this\.#[\w$]+)", "id");
+            string change = subscription.Resolve(@"name:\s*(?<change>[\w$]+)\.name", "change");
+            var callback = Regex.Match(subscription.Body,
+                @"\.onValueSet\(\s*\(?\s*" + Regex.Escape(change) + @"\s*\)?\s*=>\s*\{");
+            if (!callback.Success)
+            {
+                throw new Exception("Trainer value callback could not be located");
+            }
+
+            return new[]
+            {
+                subscription.InsertAtStart(PatchPayload.Load("remote-bridge-value-subscription", "trainerId", trainerId)),
+                new JsEdit(subscription.BodyOpen + 1 + callback.Index + callback.Length,
+                    PatchPayload.Load("remote-bridge-value-delta", "change", change))
+            };
         }
 
         private static JsFunction FindClientStateMethod(JsCursor js)
@@ -376,6 +400,6 @@ namespace WandEnhancer.Core
         private static readonly Regex WhenReady = new Regex(@"(?<app>[\w$]+)\.whenReady\(\)\.then\(");
         private static readonly Regex WhenReadyThenRun = new Regex(@"(?<app>[\w$]+)\.whenReady\(\)\.then\(run\)");
         private static readonly Regex RemoteSetValue =
-            new Regex(@"this\.(?<trainer>#[\w$]+)\.setValue\(\s*e\.name\s*,\s*e\.value\s*,\s*(?<source>[^,]+?)\s*,");
+            new Regex(@"this\.(?<trainer>#[\w$]+)\.setValue\(\s*(?<change>[\w$]+)\.name\s*,\s*\k<change>\.value\s*,\s*(?<source>[^,]+?)\s*,");
     }
 }

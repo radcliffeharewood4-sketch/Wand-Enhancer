@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using WandEnhancer.Core;
+using WandEnhancer.Core.Patching.Strategies;
 using WandEnhancer.Models;
 using WandEnhancer.Utils;
 using WandEnhancer.View.MainWindow;
@@ -22,11 +23,16 @@ namespace WandEnhancer
         [STAThread]
         public static void Main(string[] args)
         {
-            if (TryLaunchMode(args))
-                return;
-
+            // Attached first: launch mode has no window of its own, so a crash in there would
+            // otherwise be a Windows error box with none of our own words in it.
             AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
             TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+            if (TryWatchMode(args))
+                return;
+
+            if (TryLaunchMode(args))
+                return;
 
             bool startupFailed = StartupLog.Exists(entry => entry.Value == ELogType.Error);
 
@@ -34,13 +40,28 @@ namespace WandEnhancer
             application.InitializeComponent();
             var window = new MainWindow();
 
-            // Launch mode has no window at all, so a user whose Wand never opened would have to
-            // be told where launcher.log lives. Put the same lines in front of them instead.
+            // Launch mode is headless, so replay errors into the UI if startup failed.
             if (startupFailed)
                 window.Loaded += (sender, e) => BringToFront(window);
 
             application.MainWindow = window;
             application.Run();
+        }
+
+        /// <summary>
+        /// Background-watcher mode: <c>--watch-updates &lt;squirrelRoot&gt;</c>. Blocks until told to
+        /// stop; never touches the UI. Deployed and started by
+        /// <see cref="Core.Services.WatcherAutostart"/>, not something a user runs by hand.
+        /// </summary>
+        private static bool TryWatchMode(string[] args)
+        {
+            if (args.Length < 2 || !string.Equals(args[0], "--watch-updates", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            string squirrelRoot = args[1];
+            LauncherLog.Open(squirrelRoot, $"WandEnhancerWatcher {Constants.Version} build {Constants.Build} | root {squirrelRoot}");
+            Core.Services.UpdateWatcherService.Run(squirrelRoot, LauncherLog.Write);
+            return true;
         }
 
         private static bool TryLaunchMode(string[] args)
@@ -55,7 +76,10 @@ namespace WandEnhancer
             string myDir = Path.GetDirectoryName(myExe);
             string forwardedArgs = args.Length > 0 ? QuoteArguments(args) : null;
 
-            LauncherLog.Open(myDir, $"WandEnhancer {Constants.Version} | {myExe}" +
+            var patchConfig = Enhancer.LoadAutoPatchConfig(myDir);
+
+            LauncherLog.Open(myDir, $"WandEnhancer {Constants.Version} build {Constants.Build} | " +
+                                    $"patches {DescribePatches(patchConfig)} | {myExe}" +
                                     (forwardedArgs == null ? "" : $" | args {forwardedArgs}"));
 
             if (args.Length > 0 &&
@@ -78,7 +102,9 @@ namespace WandEnhancer
             var config = WeModInstalls.FindLatestWeMod(myDir);
             if (config == null)
             {
-                LauncherLog.Write($"No Wand install found under {myDir}; opening the UI instead.", ELogType.Error);
+                // RecordStartupLog, not LauncherLog.Write: the window is about to open, and this is
+                // the line that explains why.
+                RecordStartupLog($"No Wand install found under {myDir}; opening the UI instead.", ELogType.Error);
                 return false;
             }
 
@@ -86,14 +112,17 @@ namespace WandEnhancer
             LauncherLog.Write($"Install {config.ExecutablePath} is {(isPatched ? "patched" : "not patched")}.",
                 ELogType.Info);
 
-            // A fresh Wand version drops our patches; re-apply the saved selection automatically.
-            // On failure fall through to the UI so the user sees which patch broke.
-            if (!isPatched && !TryAutoPatch(config, myDir))
+            // Re-apply saved patches automatically on updates. Fall back to UI on failure.
+            if (!isPatched && !TryAutoPatch(config, patchConfig))
                 return false;
 
-            // RecordStartupLog, not LauncherLog.Write: whatever the launcher says has to survive
-            // into the window on the failure path below.
-            return FuseLauncher.Launch(config.ExecutablePath, forwardedArgs, RecordStartupLog);
+#if ENABLE_UPDATE_NOTIFICATIONS
+            UpdateNotifier.CheckInBackground();
+#endif
+
+            // Use RecordStartupLog so launcher output survives into the UI on failure.
+            var strategy = StrategyFactory.Create(patchConfig?.Strategy ?? EPatchStrategy.Supervised);
+            return strategy.Launch(new PatchContext(config, RecordStartupLog), forwardedArgs);
         }
 
 
@@ -144,11 +173,21 @@ namespace WandEnhancer
             return quoted.Append('\\', backslashes * 2).Append('"').ToString();
         }
 
-        private static bool TryAutoPatch(WeModConfig config, string launcherDir)
+        /// <summary>
+        /// Describes applied patches for diagnostic logs. Unrecorded if auto-patch is off.
+        /// </summary>
+        private static string DescribePatches(PatchConfig patchConfig)
         {
-            var patchConfig = Enhancer.LoadAutoPatchConfig(launcherDir);
-            if (patchConfig == null)
-                return true; // nothing saved to replay; launch as-is
+            if (patchConfig?.PatchTypes == null)
+                return "unrecorded";
+
+            return patchConfig.PatchTypes.Count == 0 ? "none" : string.Join(",", patchConfig.PatchTypes);
+        }
+
+        private static bool TryAutoPatch(WeModConfig config, PatchConfig patchConfig)
+        {
+            if (patchConfig == null || !patchConfig.AutoApplyAfterUpdate)
+                return true; // nothing to replay; launch as-is
 
             try
             {
@@ -165,8 +204,7 @@ namespace WandEnhancer
             }
         }
 
-        /// <summary>Buffers for the UI and mirrors to disk: auto-patch runs headless, so the
-        /// file is the only copy if the user never opens the window afterwards.</summary>
+        /// <summary>Buffers logs for the UI and mirrors them to disk for headless runs.</summary>
         private static void RecordStartupLog(string message, ELogType type)
         {
             StartupLog.Add(new KeyValuePair<string, ELogType>(message, type));
@@ -174,8 +212,7 @@ namespace WandEnhancer
         }
         
         
-        // Fires on the finalizer thread for a task nobody awaited. Non-fatal since .NET 4.5:
-        // record it and mark it observed rather than killing a patch mid-run.
+        // Handle unawaited task exceptions so they do not crash the application.
         private static void OnUnobservedTaskException(object sender, UnobservedTaskExceptionEventArgs e)
         {
             e.SetObserved();

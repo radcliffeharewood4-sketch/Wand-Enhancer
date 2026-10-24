@@ -1,18 +1,16 @@
 using System;
 using System.IO;
-using WandEnhancer.View.MainWindow;
 
 namespace WandEnhancer.Core
 {
     /// <summary>
-    /// Append-only log written next to the deployed launcher. Launch mode has no window and
-    /// exits as soon as Wand is up, so without this file a "Wand does not start" report
-    /// carries no evidence at all. Every operation swallows its own failure: diagnostics must
-    /// never be the reason Wand fails to launch.
+    /// Append-only log written next to the deployed launcher.
+    /// Diagnostics failures are swallowed so they never prevent Wand from launching.
     /// </summary>
     internal static class LauncherLog
     {
         public const string FileName = "launcher.log";
+        public const string PreviousFileName = "launcher.prev.log";
         private const long MaxBytes = 512 * 1024;
 
         private static string _path;
@@ -21,15 +19,17 @@ namespace WandEnhancer.Core
         {
             try
             {
-                var file = new FileInfo(Path.Combine(launcherDirectory, FileName));
-                // Dropped whole rather than trimmed: the session being diagnosed is the last
-                // one, and keeping half a rotated file is not worth the code.
+                string path = Path.Combine(launcherDirectory, FileName);
+                var file = new FileInfo(path);
+                // Rotated whole. One previous generation is kept.
                 if (file.Exists && file.Length > MaxBytes)
                 {
-                    file.Delete();
+                    string previous = Path.Combine(launcherDirectory, PreviousFileName);
+                    File.Delete(previous);
+                    file.MoveTo(previous);
                 }
 
-                _path = file.FullName;
+                _path = path;
                 Write($"=== {DateTime.Now:yyyy-MM-dd} {header}", ELogType.Info);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException ||

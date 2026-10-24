@@ -23,7 +23,8 @@ namespace WandEnhancer.Core.Services
             new CultureInfo("ru-RU"),
             new CultureInfo("uk-UA"),
             new CultureInfo("ja-JP"),
-            new CultureInfo("tr-TR")
+            new CultureInfo("tr-TR"),
+            new CultureInfo("bn-BD")
         };
 
         private static CultureInfo _currentLanguage;
@@ -31,8 +32,7 @@ namespace WandEnhancer.Core.Services
         private static ResourceDictionary _activeLocaleDictionary;
 
         /// <summary>
-        /// Localized string for <paramref name="key"/>, falling back to the key itself so a
-        /// missing entry is visible rather than silently blank.
+        /// Localized string for <paramref name="key"/>, falling back to the key itself.
         /// </summary>
         public static string Get(string key)
         {
@@ -120,8 +120,7 @@ namespace WandEnhancer.Core.Services
                 localeDict[entry.Key] = targetDict[entry.Key];
             }
 
-            // Track the dictionary we injected: it is built by merging entries, so its Source is
-            // null and a Source-based lookup never finds it - every switch used to append another.
+            // Track injected dictionary to replace it on switch instead of appending.
             var merged = Application.Current.Resources.MergedDictionaries;
             if (_activeLocaleDictionary != null && merged.Contains(_activeLocaleDictionary))
             {
@@ -136,7 +135,10 @@ namespace WandEnhancer.Core.Services
             
             if (saveSettings)
             {
-                SettingsManager.SaveSettings(new AppSettings { Language = supportedCulture.Name });
+                // Merge into the loaded settings so other properties survive the save.
+                var settings = SettingsManager.LoadSettings() ?? new AppSettings();
+                settings.Language = supportedCulture.Name;
+                SettingsManager.SaveSettings(settings);
             }
         }
 
